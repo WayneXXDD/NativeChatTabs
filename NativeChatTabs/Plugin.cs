@@ -10,6 +10,7 @@ using FFXIVClientStructs.FFXIV.Client.UI.Misc;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using KamiToolKit;
 using NativeChatTabs.Core;
+using Lumina.Excel.Sheets;
 namespace NativeChatTabs;
 
 public sealed class Plugin : IDalamudPlugin, IAsyncDisposable
@@ -23,22 +24,28 @@ public sealed class Plugin : IDalamudPlugin, IAsyncDisposable
     private readonly IGameInteropProvider interop;
     private readonly IPluginLog log;
     private readonly ICommandManager commands;
+    private readonly IDataManager data;
+    private sealed record FilterOption(int RowId, byte Category, byte Order, string Name, string Example);
+    private List<FilterOption> filterOptions=[];
+    private readonly Dictionary<Guid,FilterDraft> drafts=[];
+    private string filterSearch="";
+    private int editorTab;
     private readonly Configuration config;
     private readonly RecoveryStore recoveryStore;
     private readonly Task initialization;
     private NativeFilters? filters;
     private NativeTabBar? bar;
-    private int active=-1, captureSource=3;
+    private int active=-1;
     private bool showSettings, initialized, disposed, stopping;
     private ulong sessionOwner;
     private string status="正在初始化原生介面工具…";
     public Plugin(IDalamudPluginInterface pi, IFramework framework, IClientState client,
         IGameGui gui, IAddonLifecycle lifecycle, ISigScanner scanner,
-        IGameInteropProvider interop, IPluginLog log, ICommandManager commands)
+        IGameInteropProvider interop, IPluginLog log, ICommandManager commands, IDataManager data)
     {
         this.pi=pi; this.framework=framework; this.client=client; this.gui=gui;
         this.lifecycle=lifecycle; this.scanner=scanner; this.interop=interop;
-        this.log=log; this.commands=commands;
+        this.log=log; this.commands=commands; this.data=data;
         config=pi.GetPluginConfig() as Configuration ?? new();
         config.Profiles ??= new(); config.Profiles.Normalize();
         recoveryStore=new RecoveryStore(pi.ConfigDirectory.FullName);
@@ -95,6 +102,12 @@ public sealed class Plugin : IDalamudPlugin, IAsyncDisposable
             native.BindSaveProtection();
             sessionOwner=native.OwnerId;
             RecoverPending();
+            LoadFilterOptions(native.FilterSize);
+            var defaults=config.Recovery is { } backup && backup.IsValidFor(native.OwnerId,native.FilterSize)
+                ? backup.OriginalFilterBytes : native.Read(3);
+            foreach(var profile in config.Profiles.ExtraTabs)
+                if(!profile.IsConfigured(native.FilterSize)) profile.FilterBytes=defaults;
+            Save();
             bar=new NativeTabBar(i=>config.Profiles.ExtraTabs[i].Name,
                 SelectExtraSafely,Restore,()=>active,error=>Guard(()=>throw error));
             bar.Enable();
@@ -186,12 +199,82 @@ public sealed class Plugin : IDalamudPlugin, IAsyncDisposable
         // If the user changed native filters since the crash, preserve their newer choices.
         recoveryStore.Clear(); config.Recovery=null;
     }
-    private void Capture(int index)
+    private void LoadFilterOptions(int size)
     {
+        filterOptions=data.GetExcelSheet<LogFilter>()
+            .Where(row=>row.RowId<(uint)size && row.Category!=0 && row.LogKind!=0)
+            .OrderBy(row=>row.Category).ThenBy(row=>row.DisplayOrder).ThenBy(row=>row.RowId)
+            .Select(row=>new FilterOption((int)row.RowId,row.Category,row.DisplayOrder,
+                row.Name.ToString(),row.Example.ToString())).ToList();
+        if(filterOptions.Count==0) throw new InvalidOperationException("遊戲訊息類型資料尚未載入。");
+        drafts.Clear();
+    }
+    private void SaveFilters(int index,byte[] edited)
+    {
+        if(filters==null) throw new InvalidOperationException("請先登入並啟用插件。");
+        var selected=active;
         Restore();
-        if(filters==null) throw new InvalidOperationException("請先啟用插件。");
-        config.Profiles.Capture(index,filters.Read(captureSource),filters.FilterSize);
-        Save(); status="已儲存 "+config.Profiles.ExtraTabs[index].Name+" 的頻道設定。";
+        config.Profiles.Capture(index,edited,filters.FilterSize);
+        Save();
+        drafts.Remove(config.Profiles.ExtraTabs[index].Id);
+        if(selected>=0) SelectExtraSafely(selected);
+        status="已儲存 "+config.Profiles.ExtraTabs[index].Name+" 的訊息選擇。";
+    }
+    private static string CategoryName(byte category)=>category switch
+    {
+        1=>"一般聊天",2=>"通知與系統",4=>"戰鬥／自己",5=>"戰鬥／小隊",
+        6=>"戰鬥／團隊",7=>"戰鬥／其他玩家",8=>"戰鬥／交戰敵人",
+        9=>"戰鬥／其他敵人",10=>"戰鬥／友方 NPC",11=>"寵物／自己",
+        12=>"寵物／小隊",13=>"寵物／團隊",14=>"寵物／其他玩家",_=>"其他訊息"
+    };
+    private void DrawFilterEditor()
+    {
+        string[] names=config.Profiles.ExtraTabs.Select(p=>p.Name).ToArray();
+        ImGui.Combo("要設定的頁籤",ref editorTab,names,names.Length);
+        var profile=config.Profiles.ExtraTabs[editorTab];
+        var label=profile.Name;
+        if(ImGui.InputText("頁籤名稱",ref label,32)) { profile.Name=label; Save(); }
+        if(filters==null || filterOptions.Count==0)
+        { ImGui.TextWrapped("登入角色並啟用插件後，即可在這裡勾選每頁要顯示的訊息。"); return; }
+        if(!drafts.TryGetValue(profile.Id,out var draft) || draft.Length!=filters.FilterSize)
+        {
+            var bytes=profile.FilterBytes;
+            if(bytes==null || bytes.Length!=filters.FilterSize) return;
+            draft=new FilterDraft(bytes,filterOptions.Select(f=>f.RowId));
+            drafts[profile.Id]=draft;
+        }
+        ImGui.InputTextWithHint("搜尋訊息種類","例如 Party、Tell、Linkshell",ref filterSearch,128);
+        var visible=filterOptions.Where(f=>string.IsNullOrWhiteSpace(filterSearch) ||
+            f.Name.Contains(filterSearch,StringComparison.OrdinalIgnoreCase)).ToList();
+        if(ImGui.Button("全選目前清單")) draft.SetVisible(visible.Select(f=>f.RowId),true);
+        ImGui.SameLine();
+        if(ImGui.Button("全不選目前清單")) draft.SetVisible(visible.Select(f=>f.RowId),false);
+        ImGui.SameLine();
+        ImGui.TextUnformatted(draft.Changed ? "尚未儲存" : "已儲存");
+        if(ImGui.BeginChild("訊息選擇",new Vector2(0,300),ImGuiChildFlags.Borders))
+        {
+            foreach(var group in visible.GroupBy(f=>f.Category))
+            {
+                if(!ImGui.CollapsingHeader(CategoryName(group.Key)+"##"+group.Key,ImGuiTreeNodeFlags.DefaultOpen)) continue;
+                foreach(var option in group)
+                {
+                    var selected=draft.IsChecked(option.RowId);
+                    if(ImGui.Checkbox(option.Name+"##filter"+option.RowId,ref selected))
+                        draft.SetChecked(option.RowId,selected);
+                    if(ImGui.IsItemHovered() && !string.IsNullOrWhiteSpace(option.Example))
+                        ImGui.SetTooltip(option.Example);
+                }
+            }
+        }
+        ImGui.EndChild();
+        if(ImGui.Button("儲存訊息設定"))
+        {
+            var index=editorTab; var values=draft.Snapshot();
+            Queue(()=>SaveFilters(index,values));
+        }
+        ImGui.SameLine();
+        if(ImGui.Button("取消未儲存變更")) drafts.Remove(profile.Id);
+        ImGui.TextWrapped("每頁獨立保存。訊息名稱依遊戲語言顯示；這裡只改顯示內容，不會改變發話頻道。");
     }
     private void BeforeFilterSettings(AddonEvent _,AddonArgs args)=>Guard(Restore);
     private void Tick(IFramework _)
@@ -214,7 +297,8 @@ public sealed class Plugin : IDalamudPlugin, IAsyncDisposable
     private void Draw()
     {
         if(!showSettings || disposed) return;
-        ImGui.SetNextWindowSize(new Vector2(580,380),ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(640,620),ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSizeConstraints(new Vector2(520,540),new Vector2(float.MaxValue,float.MaxValue));
         if(ImGui.Begin("原生聊天頁籤 / Native Chat Tabs",ref showSettings))
         {
             ImGui.TextWrapped("國際服實驗版：在原本聊天框加入第 5、6 頁。內容仍由原生第 4 頁顯示。");
@@ -225,22 +309,9 @@ public sealed class Plugin : IDalamudPlugin, IAsyncDisposable
                 Queue(()=> { if(enabled) Activate(); else { Deactivate(); status="已關閉並還原原生頁籤。"; } });
             }
             ImGui.Separator(); ImGui.TextWrapped(status);
-            ImGui.TextWrapped("先在遊戲聊天設定中設定頻道，再選來源頁籤並儲存。新增頁籤只切換顯示過濾，不改變發話頻道。");
-            string[] choices=["原生第 1 頁","原生第 2 頁","原生第 3 頁","原生第 4 頁"];
-            ImGui.Combo("頻道設定來源",ref captureSource,choices,choices.Length);
-            for(int i=0;i<config.Profiles.ExtraTabs.Count;i++)
-            {
-                var index=i; var p=config.Profiles.ExtraTabs[i]; var name=p.Name;
-                ImGui.PushID(i);
-                if(ImGui.InputText("頁籤名稱",ref name,32))
-                { p.Name=name; Save(); }
-                ImGui.SameLine();
-                if(ImGui.Button("儲存來源頻道")) Queue(()=>Capture(index));
-                ImGui.TextUnformatted(p.FilterBytes==null ? "尚未設定頻道" : "已有頻道設定");
-                ImGui.PopID();
-            }
+            DrawFilterEditor();
             if(ImGui.Button("回復原生第 4 頁")) Queue(()=> { Restore(); RecoverPending(); status="原生設定已還原。"; });
-            ImGui.TextWrapped("需要四個未分離的原生頁籤及足夠窗寬。首次使用請先確認切換和還原；尚未完成遊戲內測試。");
+            ImGui.TextWrapped("新增頁籤排列在原生四頁右側；窗寬不足時請拉寬聊天框。");
         }
         ImGui.End();
     }

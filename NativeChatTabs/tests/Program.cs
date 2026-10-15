@@ -51,5 +51,30 @@ try
     store.Clear(); Check(store.Read()==null,"restored backup cleared");
 }
 finally{Directory.Delete(directory,true);}
+
+// Direct filter editing uses LogFilter row IDs, never chat LogKind IDs.
+var draft=new FilterDraft(new byte[]{0,9,0,7,1,0},new[]{0,2,4});
+Check(!draft.Changed,"opening filter editor does not change saved settings");
+draft.SetChecked(2,true);
+Check(draft.IsChecked(2),"checkbox updates the requested filter row");
+Check(draft.Snapshot()[1]==9 && draft.Snapshot()[3]==7,"hidden native filter bytes preserved");
+Check(draft.Snapshot()[4]==1,"editing one row preserves other channels");
+Check(draft.Changed,"unsaved edits detected");
+draft.SetVisible(new[]{0,2},false);
+Check(!draft.IsChecked(0) && !draft.IsChecked(2) && draft.IsChecked(4),"bulk changes only visible rows");
+bool invalidRow=false;
+try{draft.SetVisible(new[]{0,1},true);}catch(ArgumentOutOfRangeException){invalidRow=true;}
+Check(invalidRow && !draft.IsChecked(0),"invalid bulk change is atomic");
+var independent=draft.Snapshot(); independent[4]=0;
+Check(draft.IsChecked(4),"saved edit snapshot cannot mutate draft");
+var secondDraft=new FilterDraft(new byte[]{0,9,0,7,0,0},new[]{0,2,4});
+secondDraft.SetChecked(0,true);
+Check(!draft.IsChecked(0) && secondDraft.IsChecked(0),"extra tabs have independent message selections");
+var saved=draft.Snapshot(); profiles.Capture(1,saved,saved.Length); saved[4]=0;
+Check(profiles.ExtraTabs[1].FilterBytes![4]==1,"edited filters save through profile cloning");
+bool invalidLayout=false;
+try{_=new FilterDraft(new byte[]{0,0},new[]{2});}catch(ArgumentException){invalidLayout=true;}
+Check(invalidLayout,"filter catalogue bounds checked");
+
 Console.WriteLine($"Native Chat Tabs core: {assertions} checks passed.");
 
