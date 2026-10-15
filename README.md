@@ -1,0 +1,1 @@
+Native Chat Tabs testing distribution. Install through https://raw.githubusercontent.com/WayneXXDD/DalamudPlugins/main/pluginmaster.json . Source: https://github.com/WayneXXDD/NativeChatTabs . Enable Get plugin testing builds in Dalamud settings.
