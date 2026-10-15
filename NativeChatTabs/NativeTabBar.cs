@@ -18,7 +18,7 @@ internal unsafe sealed class NativeTabBar : IDisposable
     private AtkCollisionNode* widenedCollision;
     private ushort originalCollisionWidth;
     private AddonChatLog* boundChat;
-    public bool HasRoom { get; private set; }
+    public bool IsReady { get; private set; }
     public string? LayoutHint { get; private set; }
     public AddonChatLog* Chat=>boundChat;
     public NativeTabBar(Func<int,string> getName,Action<int> select,Action restore,
@@ -143,14 +143,14 @@ internal unsafe sealed class NativeTabBar : IDisposable
         foreach(var button in buttons) button.IsVisible=false;
         if(leftCap!=null) leftCap.IsVisible=false;
         if(rightCap!=null) rightCap.IsVisible=false;
-        HasRoom=false;
+        IsReady=false;
         if(active()>=0) restore();
     }
     private void Update(AddonChatLog* chat)
     {
         try
         {
-            HasRoom=false; LayoutHint=null;
+            IsReady=false; LayoutHint=null;
             if(buttons.Count==0) CreateButtons(chat);
             if(!HasFourthAttached() || buttons.Count!=2 || leftCap==null || rightCap==null ||
                 chat->RootNode==null)
@@ -163,8 +163,7 @@ internal unsafe sealed class NativeTabBar : IDisposable
             if(firstTab==null || !NativeNodeGeometry.TryRead((AtkResNode*)anchor,space,out _,out var anchorBounds) ||
                 !NativeNodeGeometry.TryRead((AtkResNode*)firstTab->OwnerNode,space,out _,out var firstBounds) ||
                 !NativeNodeGeometry.TryRead((AtkResNode*)start,space,out var startFrame,out var startBounds) ||
-                !NativeNodeGeometry.TryRead((AtkResNode*)end,space,out var endFrame,out var endBounds) ||
-                !NativeNodeGeometry.TryRead(chat->RootNode,space,out _,out var rootBounds))
+                !NativeNodeGeometry.TryRead((AtkResNode*)end,space,out var endFrame,out var endBounds))
             { LayoutHint="等待原生頁籤的位置與端帽資料。"; HideExtras(); return; }
             var widths=new float[2];
             for(int i=0;i<2;i++)
@@ -184,12 +183,8 @@ internal unsafe sealed class NativeTabBar : IDisposable
             var row=NativeTabLayout.AppendAfterControls(protectedRight,8,startBounds.Width,endBounds.Width,
                 firstBounds.Left-startBounds.Right,endBounds.Left-anchorBounds.Right,
                 anchor->ScaleX,widths[0],widths[1],gap);
-            HasRoom=row.RightEdge+4<=rootBounds.Right;
-            if(!HasRoom)
-            {
-                LayoutHint="請再拉寬聊天框，讓原生按鈕右側能容納帶左右端帽的 Tab 5、6。";
-                HideExtras(); return;
-            }
+            // The tab strip may extend beyond the message panel. Only the
+            // header's hit region grows; the chat frame and body keep their size.
             ExtendHitRegion(chat,space,row.RightEdge);
             leftCap.Match(start,startFrame,startBounds,row.LeftCapX);
             rightCap.Match(end,endFrame,endBounds,row.RightCapX);
@@ -202,6 +197,7 @@ internal unsafe sealed class NativeTabBar : IDisposable
             }
             if(active()>=0) chat->ChatTabs[3].Value->SetChecked(false);
             else chat->ChatTabs[3].Value->SetChecked(chat->TabIndex==3);
+            IsReady=true;
         }
         catch(Exception error) { failed(error); }
     }
@@ -215,7 +211,7 @@ internal unsafe sealed class NativeTabBar : IDisposable
     private void Finalize(AddonChatLog* chat)
     {
         try { restore(); } catch(Exception error) { failed(error); }
-        RestoreHitRegion(); DisposeVisuals(); HasRoom=false; LayoutHint=null; boundChat=null;
+        RestoreHitRegion(); DisposeVisuals(); IsReady=false; LayoutHint=null; boundChat=null;
     }
     public void Dispose() { controller.Disable(); controller.Dispose(); }
 }

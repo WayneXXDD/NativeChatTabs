@@ -111,7 +111,7 @@ public sealed class Plugin : IDalamudPlugin, IAsyncDisposable
             bar=new NativeTabBar(i=>config.Profiles.ExtraTabs[i].Name,
                 SelectExtraSafely,Restore,()=>active,error=>Guard(()=>throw error));
             bar.Enable();
-            status="已啟用。先建立四個原生頁籤；拉寬聊天框以容納額外兩頁。";
+            status="已啟用。先建立四個原生頁籤；額外兩頁會直接排列在原生按鈕右側。";
         }
         catch { Deactivate(); throw; }
     }
@@ -126,7 +126,7 @@ public sealed class Plugin : IDalamudPlugin, IAsyncDisposable
             throw new InvalidOperationException("請先登入並啟用插件。");
         if(!bar.HasFourthAttached()) throw new InvalidOperationException("請先在原生聊天框建立四個頁籤。");
         if(SettingsOpen()) throw new InvalidOperationException("請先關閉遊戲的聊天頻道設定。");
-        if(!bar.HasRoom) throw new InvalidOperationException("請拉寬聊天框，讓新增頁籤能顯示。");
+        if(!bar.IsReady) throw new InvalidOperationException("新增頁籤尚未就緒，請稍候或重新啟用插件。");
         filters.BindSaveProtection();
     }
     private void SelectExtraSafely(int index)
@@ -312,7 +312,7 @@ public sealed class Plugin : IDalamudPlugin, IAsyncDisposable
             if(bar?.LayoutHint is { } hint) ImGui.TextWrapped(hint);
             DrawFilterEditor();
             if(ImGui.Button("回復原生第 4 頁")) Queue(()=> { Restore(); RecoverPending(); status="原生設定已還原。"; });
-            ImGui.TextWrapped("新增頁籤放在原生＋／設定／關閉按鈕右側，左右使用相同端帽；窗寬不足時請拉寬聊天框。");
+            ImGui.TextWrapped("新增頁籤放在原生＋／設定／關閉按鈕右側，左右使用相同端帽，可延伸到聊天框外，不必拉寬聊天框。");
         }
         ImGui.End();
     }
