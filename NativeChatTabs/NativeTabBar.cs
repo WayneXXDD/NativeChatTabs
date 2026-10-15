@@ -15,6 +15,8 @@ internal unsafe sealed class NativeTabBar : IDisposable
     private readonly Func<int> active;
     private readonly List<NativeChatTabButton> buttons=[];
     private NativeChatTabCap? leftCap,rightCap;
+    private AtkCollisionNode* widenedCollision;
+    private ushort originalCollisionWidth;
     private AddonChatLog* boundChat;
     public bool HasRoom { get; private set; }
     public string? LayoutHint { get; private set; }
@@ -23,7 +25,7 @@ internal unsafe sealed class NativeTabBar : IDisposable
         Func<int> active,Action<Exception> failed)
     {
         this.getName=getName; this.select=select; this.restore=restore; this.active=active; this.failed=failed;
-        controller=new() { AddonName="ChatLog",OnSetup=Setup,OnUpdate=Update,OnFinalize=Finalize };
+        controller=new() { AddonName="ChatLog",OnSetup=Setup,OnPreUpdate=BeforeUpdate,OnUpdate=Update,OnFinalize=Finalize };
     }
     public void Enable()=>controller.Enable();
     public bool HasFourthAttached()
@@ -118,6 +120,24 @@ internal unsafe sealed class NativeTabBar : IDisposable
         }
         return right;
     }
+    private void RestoreHitRegion()
+    {
+        if(widenedCollision==null) return;
+        widenedCollision->SetWidth(originalCollisionWidth);
+        widenedCollision=null;
+    }
+    private void BeforeUpdate(AddonChatLog* chat)=>RestoreHitRegion();
+    private void ExtendHitRegion(AddonChatLog* chat,AtkResNode* space,float right)
+    {
+        var collision=chat->ControlsCollisionNode;
+        if(collision==null ||
+            !NativeNodeGeometry.TryRead((AtkResNode*)collision,space,out var frame,out var bounds) ||
+            frame.ScaleX<=0 || right<=bounds.Right) return;
+        originalCollisionWidth=collision->Width;
+        widenedCollision=collision;
+        collision->SetWidth((ushort)Math.Clamp(MathF.Ceiling(
+            NativeTabLayout.HitRegionWidth(originalCollisionWidth,bounds.Right,right,frame.ScaleX)),1,ushort.MaxValue));
+    }
     private void HideExtras()
     {
         foreach(var button in buttons) button.IsVisible=false;
@@ -170,6 +190,7 @@ internal unsafe sealed class NativeTabBar : IDisposable
                 LayoutHint="請再拉寬聊天框，讓原生按鈕右側能容納帶左右端帽的 Tab 5、6。";
                 HideExtras(); return;
             }
+            ExtendHitRegion(chat,space,row.RightEdge);
             leftCap.Match(start,startFrame,startBounds,row.LeftCapX);
             rightCap.Match(end,endFrame,endBounds,row.RightCapX);
             for(int i=0;i<2;i++)
@@ -194,7 +215,7 @@ internal unsafe sealed class NativeTabBar : IDisposable
     private void Finalize(AddonChatLog* chat)
     {
         try { restore(); } catch(Exception error) { failed(error); }
-        DisposeVisuals(); HasRoom=false; LayoutHint=null; boundChat=null;
+        RestoreHitRegion(); DisposeVisuals(); HasRoom=false; LayoutHint=null; boundChat=null;
     }
     public void Dispose() { controller.Disable(); controller.Dispose(); }
 }

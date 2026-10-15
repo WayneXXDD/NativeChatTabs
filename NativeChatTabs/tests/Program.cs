@@ -110,4 +110,9 @@ bool invalidScaleRejected=false;
 try { NativeTabLayout.AppendAfterControls(500,8,24,24,0,0,0,80,80,0); }
 catch(ArgumentOutOfRangeException) { invalidScaleRejected=true; }
 Check(invalidScaleRejected,"invalid native scale rejected before geometry changes");
+
+Check(NativeTabLayout.HitRegionWidth(500,500,716,1)==716,
+    "new tabs remain inside the interactive header region");
+Check(NativeTabLayout.HitRegionWidth(200,350,500,1.5f)==300,
+    "header hit bounds extend in their own scale without moving native buttons");
 Console.WriteLine($"Native Chat Tabs core: {assertions} checks passed.");

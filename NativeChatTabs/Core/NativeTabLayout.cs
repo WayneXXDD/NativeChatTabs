@@ -45,6 +45,8 @@ public static class NativeTabLayout
         return node.Width>0 && node.Height>0 && node.Height<=band.Height*2 &&
             center>=band.Top-2 && center<=band.Bottom+2;
     }
+    public static float HitRegionWidth(float originalWidth,float currentRight,float desiredRight,float scale) =>
+        originalWidth+MathF.Max(0,desiredRight-currentRight)/ValidScale(scale);
     public static float StretchWidth(float sourceWidth,float localScale,float parentDelta) =>
         MathF.Max(1,sourceWidth+parentDelta/ValidScale(localScale));
     public static float TextBoxWidth(float ownerWidth,float left,float right,float textScale) =>
