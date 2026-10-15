@@ -4,6 +4,7 @@ using FFXIVClientStructs.FFXIV.Component.GUI;
 using KamiToolKit.Controllers;
 using KamiToolKit.Enums;
 using KamiToolKit.Nodes;
+using NativeChatTabs.Core;
 namespace NativeChatTabs;
 internal unsafe sealed class NativeTabBar : IDisposable
 {
@@ -35,11 +36,12 @@ internal unsafe sealed class NativeTabBar : IDisposable
             chat->ChatTabs[3].Value->OwnerNode != null &&
             chat->ChatTabs[3].Value->OwnerNode->IsVisible();
     }
-    private void Setup(AddonChatLog* chat)
+    // Defer visual capture until PostUpdate applies the configured chat font.
+    private void Setup(AddonChatLog* chat)=>boundChat=chat;
+    private void CreateButtons(AddonChatLog* chat)
     {
         try
         {
-            boundChat=chat;
             if (buttons.Count != 0) return;
             var anchor=chat->ChatTabs[3].Value;
             if (anchor == null || anchor->OwnerNode == null) return;
@@ -88,7 +90,7 @@ internal unsafe sealed class NativeTabBar : IDisposable
     {
         try
         {
-            if(buttons.Count == 0) Setup(chat);
+            if(buttons.Count == 0) CreateButtons(chat);
             HasRoom=false;
             if(!HasFourthAttached() || buttons.Count != 2 || chat->RootNode == null)
             { foreach(var b in buttons) b.IsVisible=false; if(active()>=0) restore(); return; }
@@ -97,13 +99,20 @@ internal unsafe sealed class NativeTabBar : IDisposable
             var widths=new float[2];
             for(int i=0;i<2;i++) {
                 buttons[i].Name=getName(i);
-                widths[i]=Math.Clamp(buttons[i].ContentWidth,50,180);
+                if(!buttons[i].MatchNativeLayout(chat->ChatTabs[3].Value)) {
+                    foreach(var button in buttons) button.IsVisible=false;
+                    if(active()>=0) restore();
+                    return;
+                }
+                widths[i]=Math.Max(anchor->Width,buttons[i].ContentWidth);
             }
             var previousTab=chat->ChatTabs[2].Value;
             var previous=previousTab==null ? null : previousTab->OwnerNode;
-            var gap=previous==null ? 0 : Math.Clamp(anchor->X-previous->X-previous->Width,-2,4);
-            var start=anchor->X+anchor->Width+gap;
-            var total=widths[0]+widths[1]+2*gap;
+            var previousRight=previous==null ? anchor->X : previous->X+previous->Width*previous->ScaleX;
+            var row=NativeTabLayout.Continue(anchor->X,anchor->Width,anchor->ScaleX,
+                previousRight,widths[0],widths[1]);
+            var total=row.AddedWidth;
+            var start=row.FirstX;
             HasRoom=start+total+36 <= chat->RootNode->Width;
             if(!HasRoom)
             { foreach(var b in buttons) b.IsVisible=false; if(active()>=0) restore(); return; }
@@ -119,9 +128,8 @@ internal unsafe sealed class NativeTabBar : IDisposable
             {
                 var b=buttons[i];
                 b.Size=new Vector2(widths[i],anchor->Height);
-                b.Position=new Vector2(start,anchor->Y);
+                b.Position=new Vector2(i==0?row.FirstX:row.SecondX,anchor->Y);
                 b.IsVisible=true; b.Selected=active()==i;
-                start+=widths[i]+gap;
             }
             if(active()>=0) chat->ChatTabs[3].Value->SetChecked(false);
             else chat->ChatTabs[3].Value->SetChecked(chat->TabIndex==3);

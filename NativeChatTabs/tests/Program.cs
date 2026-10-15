@@ -76,5 +76,21 @@ bool invalidLayout=false;
 try{_=new FilterDraft(new byte[]{0,0},new[]{2});}catch(ArgumentException){invalidLayout=true;}
 Check(invalidLayout,"filter catalogue bounds checked");
 
+
+var sameScaleRow=NativeTabLayout.Continue(328,60,1,328,60,60);
+Check(sameScaleRow.FirstX==388 && sameScaleRow.SecondX==448,"extra tabs continue CWLS edge in one row");
+Check(sameScaleRow.AddedWidth==120,"native controls move past both same-size tabs");
+var hudScaleRow=NativeTabLayout.Continue(328,60,1.5f,328,60,60);
+Check(hudScaleRow.FirstX==418 && hudScaleRow.SecondX==508,"150 percent native scale does not overlap tabs");
+Check(hudScaleRow.AddedWidth==180,"HUD scaling also moves the end cap and add button");
+Check(NativeTabLayout.StretchWidth(40,1.5f,30)==60,"scaled background grows by 30 parent pixels");
+Check(NativeTabLayout.TextBoxWidth(90,15,15,1.5f)==40,"scaled text keeps native left and right padding");
+var overlapRow=NativeTabLayout.Continue(100,60,1,102,60,60);
+Check(overlapRow.FirstX==158 && overlapRow.SecondX==216,"native two pixel tab overlap is preserved");
+var spacedRow=NativeTabLayout.Continue(100,60,1,96,60,60);
+Check(spacedRow.FirstX==164 && spacedRow.SecondX==228,"native tab gap is preserved");
+bool invalidScaleRejected=false;
+try { NativeTabLayout.Continue(0,60,0,0,60,60); } catch(ArgumentOutOfRangeException) { invalidScaleRejected=true; }
+Check(invalidScaleRejected,"invalid native scale rejected before geometry changes");
 Console.WriteLine($"Native Chat Tabs core: {assertions} checks passed.");
 

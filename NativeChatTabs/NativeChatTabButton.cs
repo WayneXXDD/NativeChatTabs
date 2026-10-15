@@ -5,6 +5,7 @@ using KamiToolKit.BaseTypes;
 using KamiToolKit.Classes;
 using KamiToolKit.Extensions;
 using KamiToolKit.Nodes;
+using NativeChatTabs.Core;
 using Lumina.Data.Parsing.Uld;
 namespace NativeChatTabs;
 
@@ -47,10 +48,72 @@ internal unsafe sealed class NativeChatTabButton : ButtonBase
     }
     public float ContentWidth=>MathF.Ceiling(MathF.Max(Measure(normal),Measure(selected)));
     private static float Measure(VisualState? state)=>state==null ? 0 :
-        state.Label.GetTextDrawSize(considerScale:false).X+state.LeftPadding+state.RightPadding;
+        state.Label.GetTextDrawSize(considerScale:false).X*state.Label.ScaleX+state.LeftPadding+state.RightPadding;
     protected override void OnSizeChanged() {
         base.OnSizeChanged(); Layout(normal); Layout(selected); LayoutCollision();
     }
+
+    // ChatLog applies its configured font and dimensions after setup. Read the live
+    // fourth tab after each native update; setup-time sizes are only placeholders.
+    public bool MatchNativeLayout(AtkComponentTab* template)
+    {
+        if(template==null || template->OwnerNode==null || template->ButtonTextNode==null ||
+            template->UldManager.NodeList==null || template->UldManager.NodeListCount>512)
+            return false;
+        var owner=(AtkResNode*)template->OwnerNode;
+        if(owner->Width==0 || owner->Height==0 || owner->ScaleX<=0 || owner->ScaleY<=0)
+            return false;
+        try {
+            MatchState(normal,template,owner);
+            MatchState(selected,template,owner);
+            ApplyGeometry((AtkResNode*)Node,CaptureStyle(owner,Vector2.Zero));
+            return true;
+        } catch(InvalidOperationException) { return false; }
+    }
+    private static AtkResNode* FindNode(AtkComponentTab* template,uint id)
+    {
+        var manager=&template->UldManager;
+        for(int i=0;i<manager->NodeListCount;i++)
+            if(manager->NodeList[i]!=null && manager->NodeList[i]->NodeId==id)
+                return manager->NodeList[i];
+        return null;
+    }
+    private static void MatchState(VisualState? state,AtkComponentTab* template,AtkResNode* owner)
+    {
+        if(state==null) return;
+        var text=template->ButtonTextNode;
+        var ownerStyle=CaptureStyle(owner,Vector2.Zero);
+        state.OwnerSize=new Vector2(owner->Width,owner->Height);
+        state.OwnerStyle=state.OwnerStyle with {
+            Scale=ownerStyle.Scale,Rotation=ownerStyle.Rotation,Origin=ownerStyle.Origin
+        };
+        var textStyle=CaptureStyle((AtkResNode*)text,RelativePosition((AtkResNode*)text,owner));
+        ApplyGeometry((AtkResNode*)state.Label.Node,textStyle);
+        var font=(FontType)(text->AlignmentFontType>>4);
+        var alignment=(AlignmentType)(text->AlignmentFontType&0xF);
+        if(state.Label.FontType!=font) state.Label.FontType=font;
+        if(state.Label.AlignmentType!=alignment) state.Label.AlignmentType=alignment;
+        if(state.Label.FontSize!=text->FontSize) state.Label.FontSize=text->FontSize;
+        if(state.Label.LineSpacing!=text->LineSpacing) state.Label.LineSpacing=text->LineSpacing;
+        if(state.Label.CharSpacing!=text->CharSpacing) state.Label.CharSpacing=text->CharSpacing;
+        state.LabelPosition=textStyle.Position;
+        state.LabelSize=textStyle.Size;
+        state.LeftPadding=MathF.Max(0,textStyle.Position.X);
+        state.RightPadding=MathF.Max(0,state.OwnerSize.X-state.LeftPadding-textStyle.Size.X*textStyle.Scale.X);
+        foreach(var sprite in state.Sprites) {
+            var original=FindNode(template,sprite.NodeId);
+            if(original==null) throw new InvalidOperationException("原生頁籤的背景節點已變更。");
+            var style=CaptureStyle(original,RelativePosition(original,owner));
+            sprite.Position=style.Position; sprite.Size=style.Size;
+            ApplyGeometry((AtkResNode*)sprite.Node,style);
+        }
+        var collision=template->UldManager.RootNode;
+        state.CollisionPosition=collision!=null && collision->Type==NodeType.Collision
+            ? RelativePosition(collision,owner) : Vector2.Zero;
+        state.CollisionSize=collision!=null && collision->Type==NodeType.Collision
+            ? new Vector2(collision->Width,collision->Height) : state.OwnerSize;
+    }
+
     private void ApplySelection() {
         if(normal==null || selected==null) return;
         foreach(var sprite in normal.Sprites) sprite.Node.IsVisible=!isSelected;
@@ -72,13 +135,15 @@ internal unsafe sealed class NativeChatTabButton : ButtonBase
         var dx=Width-state.OwnerSize.X; var dy=Height-state.OwnerSize.Y;
         foreach(var sprite in state.Sprites) {
             var position=sprite.Position; var size=sprite.Size;
-            if(size.X>=state.OwnerSize.X*0.5f) size.X=MathF.Max(1,size.X+dx);
+            if(size.X*sprite.Node.ScaleX>=state.OwnerSize.X*0.5f)
+                size.X=NativeTabLayout.StretchWidth(size.X,sprite.Node.ScaleX,dx);
             else if(position.X>=state.OwnerSize.X*0.5f) position.X+=dx;
-            if(size.Y>=state.OwnerSize.Y*0.5f) size.Y=MathF.Max(1,size.Y+dy);
+            if(size.Y*sprite.Node.ScaleY>=state.OwnerSize.Y*0.5f)
+                size.Y=NativeTabLayout.StretchWidth(size.Y,sprite.Node.ScaleY,dy);
             sprite.Node.Position=position; sprite.Node.Size=size;
         }
         state.Label.Position=state.LabelPosition;
-        state.Label.Size=new Vector2(MathF.Max(1,Width-state.LeftPadding-state.RightPadding),state.LabelSize.Y);
+        state.Label.Size=new Vector2(NativeTabLayout.TextBoxWidth(Width,state.LeftPadding,state.RightPadding,state.Label.ScaleX),state.LabelSize.Y);
     }
     private VisualState Build(StateSnapshot snapshot) {
         var sprites=new List<Sprite>();
@@ -97,7 +162,7 @@ internal unsafe sealed class NativeChatTabButton : ButtonBase
             }
             visual.Position=source.Style.Position; visual.Size=source.Style.Size;
             ApplyStyle((AtkResNode*)visual,source.Style);
-            sprites.Add(new(visual,source.Style.Position,source.Style.Size));
+            sprites.Add(new(visual,source.Style.Position,source.Style.Size,source.NodeId));
         }
         var label=new TextNode(); label.AttachNode(this);
         label.FontType=(FontType)(snapshot.Text.AlignmentFontType>>4);
@@ -110,7 +175,7 @@ internal unsafe sealed class NativeChatTabButton : ButtonBase
         label.Position=snapshot.Text.Style.Position; label.Size=snapshot.Text.Style.Size;
         ApplyStyle((AtkResNode*)label.Node,snapshot.Text.Style);
         var left=MathF.Max(0,snapshot.Text.Style.Position.X);
-        var right=MathF.Max(0,snapshot.OwnerSize.X-left-snapshot.Text.Style.Size.X);
+        var right=MathF.Max(0,snapshot.OwnerSize.X-left-snapshot.Text.Style.Size.X*snapshot.Text.Style.Scale.X);
         return new(snapshot.OwnerSize,snapshot.OwnerStyle,sprites,label,
             snapshot.Text.Style.Position,snapshot.Text.Style.Size,left,right,
             snapshot.CollisionPosition,snapshot.CollisionSize);
@@ -128,20 +193,25 @@ internal unsafe sealed class NativeChatTabButton : ButtonBase
             owner->Width==0 || owner->Height==0)
             throw new InvalidOperationException("原生聊天頁籤尚未就緒。");
         var sprites=new List<SpriteSnapshot>();
+        var background=tab->ButtonBGNode;
+        var singleBackground=background!=null &&
+            (background->Type==NodeType.Image || background->Type==NodeType.NineGrid);
         for(var i=0;i<manager->NodeListCount;i++) {
             var node=manager->NodeList[i];
+            // The actual button background excludes native unread/notification icons.
+            if(singleBackground && node!=background) continue;
             if(node==null || (node->Type!=NodeType.Image && node->Type!=NodeType.NineGrid) ||
                 !VisibleWithinOwner(node,(AtkResNode*)owner) || node->Width==0 || node->Height==0) continue;
             if(node->Width<=16 && node->Height<=16) continue; // Do not copy unread indicators.
             var style=CaptureStyle(node,RelativePosition(node,(AtkResNode*)owner));
             if(node->Type==NodeType.NineGrid) {
                 var grid=(AtkNineGridNode*)node;
-                sprites.Add(new(NodeType.NineGrid,style,CapturePart(grid->PartsList,grid->PartId),
+                sprites.Add(new(NodeType.NineGrid,node->NodeId,style,CapturePart(grid->PartsList,grid->PartId),
                     new Vector4(grid->TopOffset,grid->BottomOffset,grid->LeftOffset,grid->RightOffset),
                     grid->BlendMode,grid->PartsTypeRenderType,0,0));
             } else {
                 var image=(AtkImageNode*)node;
-                sprites.Add(new(NodeType.Image,style,CapturePart(image->PartsList,image->PartId),
+                sprites.Add(new(NodeType.Image,node->NodeId,style,CapturePart(image->PartsList,image->PartId),
                     Vector4.Zero,0,0,image->WrapMode,image->Flags));
             }
         }
@@ -192,20 +262,40 @@ internal unsafe sealed class NativeChatTabButton : ButtonBase
         new Vector2(n->Width,n->Height),new Vector2(n->ScaleX,n->ScaleY),n->Rotation,
         new Vector2(n->OriginX,n->OriginY),n->Color,n->AddRed,n->AddGreen,n->AddBlue,
         n->MultiplyRed,n->MultiplyGreen,n->MultiplyBlue,n->Depth,n->Priority);
+
+    private static void ApplyGeometry(AtkResNode* n,NodeStyle s) {
+        // Native setters invalidate the cached transform as well as the draw state.
+        if(n->ScaleX!=s.Scale.X || n->ScaleY!=s.Scale.Y) n->SetScale(s.Scale.X,s.Scale.Y);
+        if(n->Rotation!=s.Rotation) n->SetRotation(s.Rotation);
+        if(n->OriginX!=s.Origin.X || n->OriginY!=s.Origin.Y) n->SetOrigin(s.Origin.X,s.Origin.Y);
+    }
+
     private static void ApplyStyle(AtkResNode* n,NodeStyle s) {
-        n->ScaleX=s.Scale.X; n->ScaleY=s.Scale.Y; n->Rotation=s.Rotation;
-        n->OriginX=s.Origin.X; n->OriginY=s.Origin.Y; n->Color=s.Color;
+        ApplyGeometry(n,s); n->Color=s.Color;
         n->AddRed=s.AddRed; n->AddGreen=s.AddGreen; n->AddBlue=s.AddBlue;
         n->MultiplyRed=s.MultiplyRed; n->MultiplyGreen=s.MultiplyGreen; n->MultiplyBlue=s.MultiplyBlue;
         n->Depth=s.Depth; n->Priority=s.Priority; n->DrawFlags|=1u;
     }
-    private sealed record VisualState(Vector2 OwnerSize,NodeStyle OwnerStyle,List<Sprite> Sprites,
-        TextNode Label,Vector2 LabelPosition,Vector2 LabelSize,float LeftPadding,float RightPadding,
-        Vector2 CollisionPosition,Vector2 CollisionSize);
-    private sealed record Sprite(NodeBase Node,Vector2 Position,Vector2 Size);
+    private sealed class VisualState(Vector2 ownerSize,NodeStyle ownerStyle,List<Sprite> sprites,
+        TextNode label,Vector2 labelPosition,Vector2 labelSize,float leftPadding,float rightPadding,
+        Vector2 collisionPosition,Vector2 collisionSize)
+    {
+        public Vector2 OwnerSize=ownerSize, LabelPosition=labelPosition, LabelSize=labelSize;
+        public Vector2 CollisionPosition=collisionPosition, CollisionSize=collisionSize;
+        public NodeStyle OwnerStyle=ownerStyle;
+        public readonly List<Sprite> Sprites=sprites;
+        public readonly TextNode Label=label;
+        public float LeftPadding=leftPadding, RightPadding=rightPadding;
+    }
+    private sealed class Sprite(NodeBase node,Vector2 position,Vector2 size,uint nodeId)
+    {
+        public readonly NodeBase Node=node;
+        public readonly uint NodeId=nodeId;
+        public Vector2 Position=position, Size=size;
+    }
     private sealed record StateSnapshot(Vector2 OwnerSize,NodeStyle OwnerStyle,List<SpriteSnapshot> Sprites,
         TextSnapshot Text,Vector2 CollisionPosition,Vector2 CollisionSize);
-    private sealed record SpriteSnapshot(NodeType Type,NodeStyle Style,PartSnapshot Part,Vector4 Offsets,
+    private sealed record SpriteSnapshot(NodeType Type,uint NodeId,NodeStyle Style,PartSnapshot Part,Vector4 Offsets,
         uint BlendMode,byte PartsRenderType,byte WrapMode,ImageNodeFlags ImageFlags);
     private readonly record struct PartSnapshot(string Path,ushort U,ushort V,ushort Width,ushort Height);
     private readonly record struct TextSnapshot(NodeStyle Style,byte AlignmentFontType,byte FontSize,
