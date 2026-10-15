@@ -49,7 +49,7 @@ internal unsafe sealed class NativeChatTabButton : ButtonBase
     private static float Measure(VisualState? state)=>state==null ? 0 :
         state.Label.GetTextDrawSize(considerScale:false).X+state.LeftPadding+state.RightPadding;
     protected override void OnSizeChanged() {
-        base.OnSizeChanged(); Layout(normal); Layout(selected);
+        base.OnSizeChanged(); Layout(normal); Layout(selected); LayoutCollision();
     }
     private void ApplySelection() {
         if(normal==null || selected==null) return;
@@ -57,6 +57,15 @@ internal unsafe sealed class NativeChatTabButton : ButtonBase
         foreach(var sprite in selected.Sprites) sprite.Node.IsVisible=isSelected;
         normal.Label.IsVisible=!isSelected; selected.Label.IsVisible=isSelected;
         ApplyStyle((AtkResNode*)Node,isSelected?selected.OwnerStyle:normal.OwnerStyle);
+        LayoutCollision();
+    }
+    private void LayoutCollision() {
+        var state=isSelected?selected:normal;
+        if(state==null) return;
+        CollisionNode.Position=state.CollisionPosition;
+        CollisionNode.Size=new Vector2(
+            MathF.Max(1,state.CollisionSize.X+Width-state.OwnerSize.X),
+            MathF.Max(1,state.CollisionSize.Y+Height-state.OwnerSize.Y));
     }
     private void Layout(VisualState? state) {
         if(state==null) return;
@@ -103,7 +112,8 @@ internal unsafe sealed class NativeChatTabButton : ButtonBase
         var left=MathF.Max(0,snapshot.Text.Style.Position.X);
         var right=MathF.Max(0,snapshot.OwnerSize.X-left-snapshot.Text.Style.Size.X);
         return new(snapshot.OwnerSize,snapshot.OwnerStyle,sprites,label,
-            snapshot.Text.Style.Position,snapshot.Text.Style.Size,left,right);
+            snapshot.Text.Style.Position,snapshot.Text.Style.Size,left,right,
+            snapshot.CollisionPosition,snapshot.CollisionSize);
     }
     private static void LoadPart(AtkUldPart* destination,PartSnapshot source) {
         if(destination==null) throw new InvalidOperationException("無法建立聊天頁籤材質。");
@@ -136,11 +146,19 @@ internal unsafe sealed class NativeChatTabButton : ButtonBase
             }
         }
         if(sprites.Count==0) throw new InvalidOperationException("等待原生聊天頁籤外觀載入。");
+        var collisionPosition=Vector2.Zero;
+        var collisionSize=new Vector2(owner->Width,owner->Height);
+        var root=manager->RootNode;
+        if(root!=null && root->Type==NodeType.Collision && root->Width>0 && root->Height>0) {
+            collisionPosition=RelativePosition(root,(AtkResNode*)owner);
+            collisionSize=new Vector2(root->Width,root->Height);
+        }
         return new(new Vector2(owner->Width,owner->Height),
             CaptureStyle((AtkResNode*)owner,Vector2.Zero),sprites,
             new(CaptureStyle((AtkResNode*)text,RelativePosition((AtkResNode*)text,(AtkResNode*)owner)),
                 text->AlignmentFontType,text->FontSize,text->LineSpacing,text->CharSpacing,
-                text->TextFlags,text->TextColor,text->EdgeColor,text->BackgroundColor));
+                text->TextFlags,text->TextColor,text->EdgeColor,text->BackgroundColor),
+            collisionPosition,collisionSize);
     }
     private static PartSnapshot CapturePart(AtkUldPartsList* list,uint id) {
         if(list==null || list->Parts==null || id>=list->PartCount)
@@ -182,9 +200,11 @@ internal unsafe sealed class NativeChatTabButton : ButtonBase
         n->Depth=s.Depth; n->Priority=s.Priority; n->DrawFlags|=1u;
     }
     private sealed record VisualState(Vector2 OwnerSize,NodeStyle OwnerStyle,List<Sprite> Sprites,
-        TextNode Label,Vector2 LabelPosition,Vector2 LabelSize,float LeftPadding,float RightPadding);
+        TextNode Label,Vector2 LabelPosition,Vector2 LabelSize,float LeftPadding,float RightPadding,
+        Vector2 CollisionPosition,Vector2 CollisionSize);
     private sealed record Sprite(NodeBase Node,Vector2 Position,Vector2 Size);
-    private sealed record StateSnapshot(Vector2 OwnerSize,NodeStyle OwnerStyle,List<SpriteSnapshot> Sprites,TextSnapshot Text);
+    private sealed record StateSnapshot(Vector2 OwnerSize,NodeStyle OwnerStyle,List<SpriteSnapshot> Sprites,
+        TextSnapshot Text,Vector2 CollisionPosition,Vector2 CollisionSize);
     private sealed record SpriteSnapshot(NodeType Type,NodeStyle Style,PartSnapshot Part,Vector4 Offsets,
         uint BlendMode,byte PartsRenderType,byte WrapMode,ImageNodeFlags ImageFlags);
     private readonly record struct PartSnapshot(string Path,ushort U,ushort V,ushort Width,ushort Height);

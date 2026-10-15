@@ -251,7 +251,7 @@ public sealed class Plugin : IDalamudPlugin, IAsyncDisposable
         if(ImGui.Button("全不選目前清單")) draft.SetVisible(visible.Select(f=>f.RowId),false);
         ImGui.SameLine();
         ImGui.TextUnformatted(draft.Changed ? "尚未儲存" : "已儲存");
-        if(ImGui.BeginChild("訊息選擇",new Vector2(0,300),ImGuiChildFlags.Borders))
+        if(ImGui.BeginChild("訊息選擇",new Vector2(0,300),true))
         {
             foreach(var group in visible.GroupBy(f=>f.Category))
             {
