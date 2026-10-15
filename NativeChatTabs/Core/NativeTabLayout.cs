@@ -1,21 +1,49 @@
 namespace NativeChatTabs.Core;
 
-// Coordinates are in the native tabs' shared parent space. Widths remain local
-// to each button, so a HUD scale must be applied before advancing to its sibling.
 public static class NativeTabLayout
 {
-    public readonly record struct Row(float FirstX,float SecondX,float AddedWidth);
+    public readonly record struct Rect(float Left,float Top,float Right,float Bottom)
+    {
+        public float Width=>Right-Left;
+        public float Height=>Bottom-Top;
+    }
+    public readonly record struct Frame(float X,float Y,float ScaleX,float ScaleY)
+    {
+        public static Frame Identity=>new(0,0,1,1);
+        public Frame ThroughParent(float x,float y,float scaleX,float scaleY,float originX,float originY) =>
+            new((X-originX)*scaleX+originX+x,(Y-originY)*scaleY+originY+y,
+                ScaleX*scaleX,ScaleY*scaleY);
+        public Frame InSpace(Frame space) => new(
+            (X-space.X)/NonzeroScale(space.ScaleX),(Y-space.Y)/NonzeroScale(space.ScaleY),
+            ScaleX/space.ScaleX,ScaleY/space.ScaleY);
+        public Rect Bounds(float width,float height) =>
+            new(MathF.Min(X,X+width*ScaleX),MathF.Min(Y,Y+height*ScaleY),
+                MathF.Max(X,X+width*ScaleX),MathF.Max(Y,Y+height*ScaleY));
+    }
+    public readonly record struct DecoratedRow(float LeftCapX,float FirstX,float SecondX,
+        float RightCapX,float RightEdge);
+    private static float NonzeroScale(float scale) =>
+        float.IsFinite(scale) && scale!=0 ? scale :
+        throw new ArgumentOutOfRangeException(nameof(scale));
     private static float ValidScale(float scale) =>
         float.IsFinite(scale) && scale>0 ? scale :
         throw new ArgumentOutOfRangeException(nameof(scale));
-    public static Row Continue(float anchorX,float anchorWidth,float scaleX,
-        float previousRight,float firstWidth,float secondWidth)
+    public static DecoratedRow AppendAfterControls(float protectedRight,float gap,
+        float leftCapWidth,float rightCapWidth,float startJoin,float endJoin,
+        float tabScale,float firstWidth,float secondWidth,float tabGap)
     {
-        scaleX=ValidScale(scaleX);
-        var gap=Math.Clamp(anchorX-previousRight,-2,4);
-        var firstX=anchorX+anchorWidth*scaleX+gap;
-        return new(firstX,firstX+firstWidth*scaleX+gap,
-            (firstWidth+secondWidth)*scaleX+2*gap);
+        tabScale=ValidScale(tabScale);
+        var left=protectedRight+gap;
+        var first=left+leftCapWidth+startJoin;
+        var second=first+firstWidth*tabScale+tabGap;
+        var right=second+secondWidth*tabScale+endJoin;
+        return new(left,first,second,right,right+rightCapWidth);
+    }
+    public static bool IsHeaderControl(Rect node,Rect band)
+    {
+        var center=(node.Top+node.Bottom)*0.5f;
+        return node.Width>0 && node.Height>0 && node.Height<=band.Height*2 &&
+            center>=band.Top-2 && center<=band.Bottom+2;
     }
     public static float StretchWidth(float sourceWidth,float localScale,float parentDelta) =>
         MathF.Max(1,sourceWidth+parentDelta/ValidScale(localScale));

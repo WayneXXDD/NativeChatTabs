@@ -309,9 +309,10 @@ public sealed class Plugin : IDalamudPlugin, IAsyncDisposable
                 Queue(()=> { if(enabled) Activate(); else { Deactivate(); status="已關閉並還原原生頁籤。"; } });
             }
             ImGui.Separator(); ImGui.TextWrapped(status);
+            if(bar?.LayoutHint is { } hint) ImGui.TextWrapped(hint);
             DrawFilterEditor();
             if(ImGui.Button("回復原生第 4 頁")) Queue(()=> { Restore(); RecoverPending(); status="原生設定已還原。"; });
-            ImGui.TextWrapped("新增頁籤排列在原生四頁右側；窗寬不足時請拉寬聊天框。");
+            ImGui.TextWrapped("新增頁籤放在原生＋／設定／關閉按鈕右側，左右使用相同端帽；窗寬不足時請拉寬聊天框。");
         }
         ImGui.End();
     }

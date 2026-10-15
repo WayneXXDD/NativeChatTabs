@@ -77,20 +77,37 @@ try{_=new FilterDraft(new byte[]{0,0},new[]{2});}catch(ArgumentException){invali
 Check(invalidLayout,"filter catalogue bounds checked");
 
 
-var sameScaleRow=NativeTabLayout.Continue(328,60,1,328,60,60);
-Check(sameScaleRow.FirstX==388 && sameScaleRow.SecondX==448,"extra tabs continue CWLS edge in one row");
-Check(sameScaleRow.AddedWidth==120,"native controls move past both same-size tabs");
-var hudScaleRow=NativeTabLayout.Continue(328,60,1.5f,328,60,60);
-Check(hudScaleRow.FirstX==418 && hudScaleRow.SecondX==508,"150 percent native scale does not overlap tabs");
-Check(hudScaleRow.AddedWidth==180,"HUD scaling also moves the end cap and add button");
+
+var protectedRow=NativeTabLayout.AppendAfterControls(500,8,24,24,0,0,1,80,80,0);
+Check(protectedRow.LeftCapX==508 && protectedRow.FirstX==532,"new left cap begins after all native controls");
+Check(protectedRow.SecondX==612 && protectedRow.RightCapX==692 && protectedRow.RightEdge==716,
+    "tab pair ends with its own native right cap");
+Check(protectedRow.LeftCapX>500,"no part of new group covers the native close button");
+var scaledRow=NativeTabLayout.AppendAfterControls(500,8,36,36,0,0,1.5f,80,80,0);
+Check(scaledRow.FirstX==544 && scaledRow.SecondX==664 && scaledRow.RightEdge==820,
+    "scaled cap and button widths leave native controls accessible");
+var joinedRow=NativeTabLayout.AppendAfterControls(500,8,24,24,-2,-2,1,80,80,-2);
+Check(joinedRow.FirstX==530 && joinedRow.SecondX==608 && joinedRow.RightCapX==686,
+    "native cap seams and tab overlap are preserved");
+var band=new NativeTabLayout.Rect(0,20,500,50);
+Check(NativeTabLayout.IsHeaderControl(new(460,20,492,50),band),"header close button reserves space");
+Check(!NativeTabLayout.IsHeaderControl(new(0,55,400,80),band),"chat input on another row is excluded");
+Check(!NativeTabLayout.IsHeaderControl(new(0,0,900,500),band),"full window rectangle is excluded");
+Check(!NativeTabLayout.IsHeaderControl(new(0,20,0,50),band),"empty control has no occupied area");
+var windowFrame=NativeTabLayout.Frame.Identity.ThroughParent(10,10,1.5f,1.5f,0,0);
+var closeFrame=NativeTabLayout.Frame.Identity.ThroughParent(400,20,1,1,0,0)
+    .ThroughParent(20,0,1,1,0,0).ThroughParent(10,10,1.5f,1.5f,0,0);
+var closeInRow=closeFrame.InSpace(windowFrame).Bounds(24,24);
+Check(closeInRow.Left==420 && closeInRow.Right==444 && closeInRow.Top==20,
+    "nested native close button is measured in the tabs' shared parent space");
+var mirroredCap=new NativeTabLayout.Frame(24,20,-1,1).Bounds(24,30);
+Check(mirroredCap.Left==0 && mirroredCap.Right==24,"mirrored native end cap keeps its full width");
+var scaledOrigin=NativeTabLayout.Frame.Identity.ThroughParent(100,20,1.5f,1.5f,20,0).Bounds(60,20);
+Check(scaledOrigin.Left==90 && scaledOrigin.Right==180,"native transform origin is accounted for");
 Check(NativeTabLayout.StretchWidth(40,1.5f,30)==60,"scaled background grows by 30 parent pixels");
 Check(NativeTabLayout.TextBoxWidth(90,15,15,1.5f)==40,"scaled text keeps native left and right padding");
-var overlapRow=NativeTabLayout.Continue(100,60,1,102,60,60);
-Check(overlapRow.FirstX==158 && overlapRow.SecondX==216,"native two pixel tab overlap is preserved");
-var spacedRow=NativeTabLayout.Continue(100,60,1,96,60,60);
-Check(spacedRow.FirstX==164 && spacedRow.SecondX==228,"native tab gap is preserved");
 bool invalidScaleRejected=false;
-try { NativeTabLayout.Continue(0,60,0,0,60,60); } catch(ArgumentOutOfRangeException) { invalidScaleRejected=true; }
+try { NativeTabLayout.AppendAfterControls(500,8,24,24,0,0,0,80,80,0); }
+catch(ArgumentOutOfRangeException) { invalidScaleRejected=true; }
 Check(invalidScaleRejected,"invalid native scale rejected before geometry changes");
 Console.WriteLine($"Native Chat Tabs core: {assertions} checks passed.");
-
