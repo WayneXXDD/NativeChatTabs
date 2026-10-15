@@ -10,7 +10,7 @@ using FFXIVClientStructs.FFXIV.Client.UI.Misc;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using KamiToolKit;
 using NativeChatTabs.Core;
-using Lumina.Excel.Sheets;
+using LogFilter = Lumina.Excel.Sheets.LogFilter;
 namespace NativeChatTabs;
 
 public sealed class Plugin : IDalamudPlugin, IAsyncDisposable

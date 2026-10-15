@@ -45,7 +45,7 @@ internal unsafe sealed class NativeTabBar : IDisposable
             if (anchor == null || anchor->OwnerNode == null) return;
             if(chat->TabCount<4 || chat->TabIndex>=4) return;
             var chosen=chat->ChatTabs[chat->TabIndex].Value;
-            if(chosen==null || !chosen->OwnerNode->IsVisible()) return;
+            if(chosen==null || chosen->OwnerNode==null || !chosen->OwnerNode->IsVisible()) return;
             if(active()<0 && !chosen->IsChecked) { chosen->SetChecked(true); return; }
             AtkComponentTab* idle=null;
             for(var j=0;j<4;j++)
@@ -99,8 +99,9 @@ internal unsafe sealed class NativeTabBar : IDisposable
                 buttons[i].Name=getName(i);
                 widths[i]=Math.Clamp(buttons[i].ContentWidth,50,180);
             }
-            var previous=chat->ChatTabs[2].Value->OwnerNode;
-            var gap=Math.Clamp(anchor->X-previous->X-previous->Width,-2,4);
+            var previousTab=chat->ChatTabs[2].Value;
+            var previous=previousTab==null ? null : previousTab->OwnerNode;
+            var gap=previous==null ? 0 : Math.Clamp(anchor->X-previous->X-previous->Width,-2,4);
             var start=anchor->X+anchor->Width+gap;
             var total=widths[0]+widths[1]+2*gap;
             HasRoom=start+total+36 <= chat->RootNode->Width;
