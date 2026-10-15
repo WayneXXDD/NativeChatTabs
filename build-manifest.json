@@ -3,11 +3,11 @@
     "Author": "WayneXXDD",
     "Name": "Native Chat Tabs (Wayne, Testing)",
     "InternalName": "NativeChatTabs",
-    "AssemblyVersion": "0.1.0.0",
+    "AssemblyVersion": "0.1.1.0",
     "DalamudApiLevel": 15,
     "ApplicableVersion": "any",
     "Punchline": "Two extra tabs inside the original chat window.",
-    "Description": "Experimental Global client prototype. Adds native tab buttons; two extra filter profiles reuse the fourth log panel. Use /nct to configure and enable. Requires in-game validation.",
+    "Description": "Global client testing plugin. Adds two tabs beside the original chat tabs, using the game's own chat-tab appearance. Each extra tab directly selects its message types in /nct; the fourth native log panel remains the rendering slot.",
     "LoadSync": false,
     "CanUnloadAsync": true,
     "Tags": [
@@ -15,11 +15,12 @@
       "tabs"
     ],
     "RepoUrl": "https://github.com/WayneXXDD/NativeChatTabs",
-    "TestingAssemblyVersion": "0.1.0.0",
+    "TestingAssemblyVersion": "0.1.1.0",
     "TestingDalamudApiLevel": 15,
     "IsTestingExclusive": true,
+    "Changelog": "0.1.1.0: Match the native chat tab appearance, font and baseline. Add independent searchable message-type checkboxes for each extra tab; preserve existing profiles.",
     "IsHide": false,
-    "LastUpdate": 1792023291,
+    "LastUpdate": 1792024384,
     "DownloadLinkInstall": "https://raw.githubusercontent.com/WayneXXDD/NativeChatTabs/plugin-repo/plugins/NativeChatTabs/latest.zip",
     "DownloadLinkUpdate": "https://raw.githubusercontent.com/WayneXXDD/NativeChatTabs/plugin-repo/plugins/NativeChatTabs/latest.zip",
     "DownloadLinkTesting": "https://raw.githubusercontent.com/WayneXXDD/NativeChatTabs/plugin-repo/plugins/NativeChatTabs/latest.zip"
