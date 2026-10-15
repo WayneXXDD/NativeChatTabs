@@ -48,6 +48,7 @@ public sealed class Plugin : IDalamudPlugin, IAsyncDisposable
         this.log=log; this.commands=commands; this.data=data;
         config=pi.GetPluginConfig() as Configuration ?? new();
         config.Profiles ??= new(); config.Profiles.Normalize();
+        config.Placement ??= new();
         recoveryStore=new RecoveryStore(pi.ConfigDirectory.FullName);
         try { config.Recovery=recoveryStore.Read(); }
         catch(Exception error) { log.Error(error,"Recovery backup cannot be read."); config.Enabled=false; }
@@ -109,7 +110,9 @@ public sealed class Plugin : IDalamudPlugin, IAsyncDisposable
                 if(!profile.IsConfigured(native.FilterSize)) profile.FilterBytes=defaults;
             Save();
             bar=new NativeTabBar(i=>config.Profiles.ExtraTabs[i].Name,
-                SelectExtraSafely,Restore,()=>active,error=>Guard(()=>throw error));
+                SelectExtraSafely,Restore,()=>active,
+                ()=>new Vector2(config.Placement.HorizontalOffset,config.Placement.VerticalOffset),
+                error=>Guard(()=>throw error));
             bar.Enable();
             status="已啟用。先建立四個原生頁籤；額外兩頁會直接排列在原生按鈕右側。";
         }
@@ -227,6 +230,23 @@ public sealed class Plugin : IDalamudPlugin, IAsyncDisposable
         9=>"戰鬥／其他敵人",10=>"戰鬥／友方 NPC",11=>"寵物／自己",
         12=>"寵物／小隊",13=>"寵物／團隊",14=>"寵物／其他玩家",_=>"其他訊息"
     };
+    private void DrawPlacementControls()
+    {
+        if(!ImGui.CollapsingHeader("頁簽位置")) return;
+        ImGui.TextWrapped("Tab 5、6 與左右端帽一起移動，修改後立即生效並自動儲存。");
+        var horizontal=config.Placement.HorizontalOffset;
+        var vertical=config.Placement.VerticalOffset;
+        ImGui.SetNextItemWidth(180);
+        if(ImGui.InputInt("水平偏移（向右為正）",ref horizontal)) {
+            config.Placement.HorizontalOffset=horizontal; Save();
+        }
+        ImGui.SetNextItemWidth(180);
+        if(ImGui.InputInt("垂直偏移（向下為正）",ref vertical)) {
+            config.Placement.VerticalOffset=vertical; Save();
+        }
+        if(ImGui.Button("重設頁簽位置")) { config.Placement.Reset(); Save(); }
+        ImGui.Separator();
+    }
     private void DrawFilterEditor()
     {
         string[] names=config.Profiles.ExtraTabs.Select(p=>p.Name).ToArray();
@@ -310,9 +330,10 @@ public sealed class Plugin : IDalamudPlugin, IAsyncDisposable
             }
             ImGui.Separator(); ImGui.TextWrapped(status);
             if(bar?.LayoutHint is { } hint) ImGui.TextWrapped(hint);
+            DrawPlacementControls();
             DrawFilterEditor();
             if(ImGui.Button("回復原生第 4 頁")) Queue(()=> { Restore(); RecoverPending(); status="原生設定已還原。"; });
-            ImGui.TextWrapped("新增頁籤放在原生＋／設定／關閉按鈕右側，左右使用相同端帽，可延伸到聊天框外，不必拉寬聊天框。");
+            ImGui.TextWrapped("新增頁籤與左右端帽可在「頁簽位置」調整水平／垂直偏移，無須拉寬聊天框。");
         }
         ImGui.End();
     }

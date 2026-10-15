@@ -115,4 +115,34 @@ Check(NativeTabLayout.HitRegionWidth(500,500,716,1)==716,
     "new tabs remain inside the interactive header region");
 Check(NativeTabLayout.HitRegionWidth(200,350,500,1.5f)==300,
     "header hit bounds extend in their own scale without moving native buttons");
+
+var placement=JsonSerializer.Deserialize<TabPlacement>("{}")!;
+Check(placement.HorizontalOffset==24 && placement.VerticalOffset==0,
+    "older settings use extra close-button clearance by default");
+placement.HorizontalOffset=73; placement.VerticalOffset=-18;
+var savedPlacement=JsonSerializer.Deserialize<TabPlacement>(JsonSerializer.Serialize(placement))!;
+Check(savedPlacement.HorizontalOffset==73 && savedPlacement.VerticalOffset==-18,
+    "horizontal and vertical placement survive saved settings");
+var shiftedRow=protectedRow.OffsetX(savedPlacement.HorizontalOffset);
+Check(shiftedRow.LeftCapX==581 && shiftedRow.FirstX==605 &&
+    shiftedRow.SecondX==685 && shiftedRow.RightCapX==765 && shiftedRow.RightEdge==789,
+    "both native caps and both tabs move together");
+Check(shiftedRow.RightEdge-shiftedRow.LeftCapX==protectedRow.RightEdge-protectedRow.LeftCapX,
+    "changing position preserves the tab pair size and spacing");
+var originalHeader=new NativeTabLayout.Rect(0,20,500,50);
+var upperPair=new NativeTabLayout.Rect(581,-10,789,20);
+var upperHit=originalHeader.Union(upperPair);
+Check(upperHit==new NativeTabLayout.Rect(0,-10,789,50),
+    "moving the pair upward includes its new click bounds");
+var lowerHit=originalHeader.Union(new NativeTabLayout.Rect(581,80,789,110));
+Check(lowerHit==new NativeTabLayout.Rect(0,20,789,110),
+    "moving the pair downward includes its new click bounds");
+Check(originalHeader==new NativeTabLayout.Rect(0,20,500,50),
+    "placement calculations preserve original header bounds for restoration");
+savedPlacement.Reset();
+Check(savedPlacement.HorizontalOffset==24 && savedPlacement.VerticalOffset==0,
+    "reset returns the whole pair to its default clear position");
+savedPlacement.HorizontalOffset=int.MaxValue; savedPlacement.VerticalOffset=int.MinValue;
+Check(savedPlacement.HorizontalOffset==4096 && savedPlacement.VerticalOffset==-4096,
+    "saved offsets remain within native UI coordinate limits");
 Console.WriteLine($"Native Chat Tabs core: {assertions} checks passed.");

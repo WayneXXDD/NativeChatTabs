@@ -6,6 +6,8 @@ public static class NativeTabLayout
     {
         public float Width=>Right-Left;
         public float Height=>Bottom-Top;
+        public Rect Union(Rect other)=>new(MathF.Min(Left,other.Left),MathF.Min(Top,other.Top),
+            MathF.Max(Right,other.Right),MathF.Max(Bottom,other.Bottom));
     }
     public readonly record struct Frame(float X,float Y,float ScaleX,float ScaleY)
     {
@@ -21,7 +23,10 @@ public static class NativeTabLayout
                 MathF.Max(X,X+width*ScaleX),MathF.Max(Y,Y+height*ScaleY));
     }
     public readonly record struct DecoratedRow(float LeftCapX,float FirstX,float SecondX,
-        float RightCapX,float RightEdge);
+        float RightCapX,float RightEdge)
+    {
+        public DecoratedRow OffsetX(float x)=>new(LeftCapX+x,FirstX+x,SecondX+x,RightCapX+x,RightEdge+x);
+    }
     private static float NonzeroScale(float scale) =>
         float.IsFinite(scale) && scale!=0 ? scale :
         throw new ArgumentOutOfRangeException(nameof(scale));

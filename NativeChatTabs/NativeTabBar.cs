@@ -13,18 +13,19 @@ internal unsafe sealed class NativeTabBar : IDisposable
     private readonly Action restore;
     private readonly Action<Exception> failed;
     private readonly Func<int> active;
+    private readonly Func<Vector2> getOffset;
     private readonly List<NativeChatTabButton> buttons=[];
     private NativeChatTabCap? leftCap,rightCap;
     private AtkCollisionNode* widenedCollision;
-    private ushort originalCollisionWidth;
+    private Vector2 originalCollisionPosition,originalCollisionSize;
     private AddonChatLog* boundChat;
     public bool IsReady { get; private set; }
     public string? LayoutHint { get; private set; }
     public AddonChatLog* Chat=>boundChat;
     public NativeTabBar(Func<int,string> getName,Action<int> select,Action restore,
-        Func<int> active,Action<Exception> failed)
+        Func<int> active,Func<Vector2> getOffset,Action<Exception> failed)
     {
-        this.getName=getName; this.select=select; this.restore=restore; this.active=active; this.failed=failed;
+        this.getName=getName; this.select=select; this.restore=restore; this.active=active; this.getOffset=getOffset; this.failed=failed;
         controller=new() { AddonName="ChatLog",OnSetup=Setup,OnPreUpdate=BeforeUpdate,OnUpdate=Update,OnFinalize=Finalize };
     }
     public void Enable()=>controller.Enable();
@@ -123,20 +124,32 @@ internal unsafe sealed class NativeTabBar : IDisposable
     private void RestoreHitRegion()
     {
         if(widenedCollision==null) return;
-        widenedCollision->SetWidth(originalCollisionWidth);
+        widenedCollision->SetPositionFloat(originalCollisionPosition.X,originalCollisionPosition.Y);
+        widenedCollision->SetWidth((ushort)originalCollisionSize.X);
+        widenedCollision->SetHeight((ushort)originalCollisionSize.Y);
         widenedCollision=null;
     }
     private void BeforeUpdate(AddonChatLog* chat)=>RestoreHitRegion();
-    private void ExtendHitRegion(AddonChatLog* chat,AtkResNode* space,float right)
+    private void ExtendHitRegion(AddonChatLog* chat,AtkResNode* space,NativeTabLayout.Rect extraBounds)
     {
         var collision=chat->ControlsCollisionNode;
         if(collision==null ||
             !NativeNodeGeometry.TryRead((AtkResNode*)collision,space,out var frame,out var bounds) ||
-            frame.ScaleX<=0 || right<=bounds.Right) return;
-        originalCollisionWidth=collision->Width;
+            frame.ScaleX<=0 || frame.ScaleY<=0) return;
+        var expanded=bounds.Union(extraBounds);
+        // Never move an ancestor of the game's own visual nodes. The extra
+        // buttons also carry their own collision nodes at the configured position.
+        if(collision->ChildNode!=null)
+            expanded=expanded with { Left=bounds.Left,Top=bounds.Top };
+        if(expanded==bounds) return;
+        originalCollisionPosition=new Vector2(collision->X,collision->Y);
+        originalCollisionSize=new Vector2(collision->Width,collision->Height);
         widenedCollision=collision;
-        collision->SetWidth((ushort)Math.Clamp(MathF.Ceiling(
-            NativeTabLayout.HitRegionWidth(originalCollisionWidth,bounds.Right,right,frame.ScaleX)),1,ushort.MaxValue));
+        collision->SetPositionFloat(
+            originalCollisionPosition.X+(expanded.Left-bounds.Left)*collision->ScaleX/frame.ScaleX,
+            originalCollisionPosition.Y+(expanded.Top-bounds.Top)*collision->ScaleY/frame.ScaleY);
+        collision->SetWidth((ushort)Math.Clamp(MathF.Ceiling(expanded.Width/frame.ScaleX),1,ushort.MaxValue));
+        collision->SetHeight((ushort)Math.Clamp(MathF.Ceiling(expanded.Height/frame.ScaleY),1,ushort.MaxValue));
     }
     private void HideExtras()
     {
@@ -180,19 +193,25 @@ internal unsafe sealed class NativeTabBar : IDisposable
             var band=new NativeTabLayout.Rect(startBounds.Left,
                 MathF.Min(startBounds.Top,endBounds.Top),endBounds.Right,MathF.Max(startBounds.Bottom,endBounds.Bottom));
             var protectedRight=NativeControlsRight(chat,space,band,MathF.Max(anchorBounds.Right,endBounds.Right));
+            var offset=getOffset();
             var row=NativeTabLayout.AppendAfterControls(protectedRight,8,startBounds.Width,endBounds.Width,
                 firstBounds.Left-startBounds.Right,endBounds.Left-anchorBounds.Right,
-                anchor->ScaleX,widths[0],widths[1],gap);
+                anchor->ScaleX,widths[0],widths[1],gap).OffsetX(offset.X);
             // The tab strip may extend beyond the message panel. Only the
             // header's hit region grows; the chat frame and body keep their size.
-            ExtendHitRegion(chat,space,row.RightEdge);
+            ExtendHitRegion(chat,space,new NativeTabLayout.Rect(
+                MathF.Min(row.LeftCapX,row.FirstX),
+                MathF.Min(MathF.Min(startBounds.Top,endBounds.Top),anchorBounds.Top)+offset.Y,
+                row.RightEdge,
+                MathF.Max(MathF.Max(startBounds.Bottom,endBounds.Bottom),anchorBounds.Bottom)+offset.Y));
             leftCap.Match(start,startFrame,startBounds,row.LeftCapX);
             rightCap.Match(end,endFrame,endBounds,row.RightCapX);
+            leftCap.Y+=offset.Y; rightCap.Y+=offset.Y;
             for(int i=0;i<2;i++)
             {
                 var button=buttons[i];
                 button.Size=new Vector2(widths[i],anchor->Height);
-                button.Position=new Vector2((i==0?row.FirstX:row.SecondX)+anchor->X-anchorBounds.Left,anchor->Y);
+                button.Position=new Vector2((i==0?row.FirstX:row.SecondX)+anchor->X-anchorBounds.Left,anchor->Y+offset.Y);
                 button.IsVisible=true; button.Selected=active()==i;
             }
             if(active()>=0) chat->ChatTabs[3].Value->SetChecked(false);
