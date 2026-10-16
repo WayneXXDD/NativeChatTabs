@@ -3,6 +3,7 @@ using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using KamiToolKit.Controllers;
 using KamiToolKit.Enums;
+using KamiToolKit.Nodes;
 using NativeChatTabs.Core;
 namespace NativeChatTabs;
 internal unsafe sealed class NativeTabBar : IDisposable
@@ -14,8 +15,10 @@ internal unsafe sealed class NativeTabBar : IDisposable
     private readonly Action<Exception> failed;
     private readonly Func<int> active;
     private readonly Func<Vector2> getOffset;
+    private readonly Action openSettings;
     private readonly List<NativeChatTabButton> buttons=[];
     private NativeChatTabCap? leftCap,rightCap;
+    private CircleButtonNode? settingsButton;
     private AtkCollisionNode* widenedCollision;
     private Vector2 originalCollisionPosition,originalCollisionSize;
     private AddonChatLog* boundChat;
@@ -23,9 +26,9 @@ internal unsafe sealed class NativeTabBar : IDisposable
     public string? LayoutHint { get; private set; }
     public AddonChatLog* Chat=>boundChat;
     public NativeTabBar(Func<int,string> getName,Action<int> select,Action restore,
-        Func<int> active,Func<Vector2> getOffset,Action<Exception> failed)
+        Func<int> active,Func<Vector2> getOffset,Action openSettings,Action<Exception> failed)
     {
-        this.getName=getName; this.select=select; this.restore=restore; this.active=active; this.getOffset=getOffset; this.failed=failed;
+        this.getName=getName; this.select=select; this.restore=restore; this.active=active; this.getOffset=getOffset; this.openSettings=openSettings; this.failed=failed;
         controller=new() { AddonName="ChatLog",OnSetup=Setup,OnPreUpdate=BeforeUpdate,OnUpdate=Update,OnFinalize=Finalize };
     }
     public void Enable()=>controller.Enable();
@@ -73,9 +76,18 @@ internal unsafe sealed class NativeTabBar : IDisposable
             button.AttachNode(after,NodePosition.AfterTarget); after=(AtkResNode*)button.Node;
         }
         rightCap.AttachNode(after,NodePosition.AfterTarget);
+        settingsButton=new CircleButtonNode {
+            Icon=CircleButtonIcon.GearCog,
+            Size=new Vector2(28,28),
+            IsVisible=false,
+            TextTooltip="Native Chat Tabs settings (/nct)",
+            OnClick=()=> { try { openSettings(); } catch(Exception error) { failed(error); } }
+        };
+        settingsButton.AttachNode((AtkResNode*)rightCap.Node,NodePosition.AfterTarget);
     }
     private bool IsExtraButton(AtkResNode* node)
     {
+        if(settingsButton!=null && (AtkResNode*)settingsButton.Node==node) return true;
         foreach(var button in buttons) if((AtkResNode*)button.Node==node) return true;
         return false;
     }
@@ -121,6 +133,32 @@ internal unsafe sealed class NativeTabBar : IDisposable
         }
         return right;
     }
+    private static NativeTabLayout.Rect SettingsBounds(AddonChatLog* chat,AtkResNode* space,
+        NativeTabLayout.Rect band,float left,float offsetY,Vector2 fallbackSize)
+    {
+        var size=fallbackSize;
+        var top=band.Top+(band.Height-size.Y)*0.5f;
+        var native=chat->SettingsComponentNode;
+        if(native!=null && NativeNodeGeometry.TryRead((AtkResNode*)native,space,out _,out var ownerBounds))
+        {
+            size=new Vector2(ownerBounds.Width,ownerBounds.Height);
+            top=ownerBounds.Top;
+            var component=native->Component;
+            if(component!=null && component->GetComponentType()==ComponentType.Button)
+            {
+                var background=((AtkComponentButton*)component)->ButtonBGNode;
+                if(background!=null &&
+                    NativeNodeGeometry.TryRead(background,space,out _,out var imageBounds) &&
+                    imageBounds.Width<=ownerBounds.Width*2 && imageBounds.Height<=ownerBounds.Height*2)
+                {
+                    // The native image can be larger than the component's hit box.
+                    size=new Vector2(imageBounds.Width,imageBounds.Height);
+                    top=ownerBounds.Top+(ownerBounds.Height-size.Y)*0.5f;
+                }
+            }
+        }
+        return new(left,top+offsetY,left+size.X,top+offsetY+size.Y);
+    }
     private void RestoreHitRegion()
     {
         if(widenedCollision==null) return;
@@ -156,6 +194,7 @@ internal unsafe sealed class NativeTabBar : IDisposable
         foreach(var button in buttons) button.IsVisible=false;
         if(leftCap!=null) leftCap.IsVisible=false;
         if(rightCap!=null) rightCap.IsVisible=false;
+        if(settingsButton!=null) settingsButton.IsVisible=false;
         IsReady=false;
         if(active()>=0) restore();
     }
@@ -165,7 +204,7 @@ internal unsafe sealed class NativeTabBar : IDisposable
         {
             IsReady=false; LayoutHint=null;
             if(buttons.Count==0) CreateButtons(chat);
-            if(!HasFourthAttached() || buttons.Count!=2 || leftCap==null || rightCap==null ||
+            if(!HasFourthAttached() || buttons.Count!=2 || leftCap==null || rightCap==null || settingsButton==null ||
                 chat->RootNode==null)
             { HideExtras(); return; }
             if(active()>=0 && chat->TabIndex!=3) restore();
@@ -199,11 +238,17 @@ internal unsafe sealed class NativeTabBar : IDisposable
                 anchor->ScaleX,widths[0],widths[1],gap).OffsetX(offset.X);
             // The tab strip may extend beyond the message panel. Only the
             // header's hit region grows; the chat frame and body keep their size.
-            ExtendHitRegion(chat,space,new NativeTabLayout.Rect(
+            var settingsBounds=SettingsBounds(chat,space,band,row.RightEdge+8,offset.Y,
+                new Vector2(28*anchor->ScaleX,28*anchor->ScaleY));
+            var groupBounds=new NativeTabLayout.Rect(
                 MathF.Min(row.LeftCapX,row.FirstX),
                 MathF.Min(MathF.Min(startBounds.Top,endBounds.Top),anchorBounds.Top)+offset.Y,
                 row.RightEdge,
-                MathF.Max(MathF.Max(startBounds.Bottom,endBounds.Bottom),anchorBounds.Bottom)+offset.Y));
+                MathF.Max(MathF.Max(startBounds.Bottom,endBounds.Bottom),anchorBounds.Bottom)+offset.Y);
+            ExtendHitRegion(chat,space,groupBounds.Union(settingsBounds));
+            settingsButton.Size=new Vector2(settingsBounds.Width,settingsBounds.Height);
+            settingsButton.Position=new Vector2(settingsBounds.Left,settingsBounds.Top);
+            settingsButton.IsVisible=true;
             leftCap.Match(start,startFrame,startBounds,row.LeftCapX);
             rightCap.Match(end,endFrame,endBounds,row.RightCapX);
             leftCap.Y+=offset.Y; rightCap.Y+=offset.Y;
@@ -222,6 +267,7 @@ internal unsafe sealed class NativeTabBar : IDisposable
     }
     private void DisposeVisuals()
     {
+        settingsButton?.Dispose(); settingsButton=null;
         foreach(var button in buttons) button.Dispose();
         buttons.Clear();
         leftCap?.Dispose(); leftCap=null;

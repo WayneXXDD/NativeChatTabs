@@ -52,7 +52,7 @@ public sealed class Plugin : IDalamudPlugin, IAsyncDisposable
         recoveryStore=new RecoveryStore(pi.ConfigDirectory.FullName);
         try { config.Recovery=recoveryStore.Read(); }
         catch(Exception error) { log.Error(error,"Recovery backup cannot be read."); config.Enabled=false; }
-        commands.AddHandler("/nct",new CommandInfo((_,_)=>showSettings=true)
+        commands.AddHandler("/nct",new CommandInfo((_,_)=>OpenSettings())
             { HelpMessage="原生聊天頁籤：設定、啟用及復原。" });
         pi.UiBuilder.Draw+=Draw;
         pi.UiBuilder.OpenConfigUi+=OpenSettings;
@@ -112,7 +112,7 @@ public sealed class Plugin : IDalamudPlugin, IAsyncDisposable
             bar=new NativeTabBar(i=>config.Profiles.ExtraTabs[i].Name,
                 SelectExtraSafely,Restore,()=>active,
                 ()=>new Vector2(config.Placement.HorizontalOffset,config.Placement.VerticalOffset),
-                error=>Guard(()=>throw error));
+                OpenSettings,error=>Guard(()=>throw error));
             bar.Enable();
             status="已啟用。先建立四個原生頁籤；額外兩頁會直接排列在原生按鈕右側。";
         }
@@ -233,7 +233,7 @@ public sealed class Plugin : IDalamudPlugin, IAsyncDisposable
     private void DrawPlacementControls()
     {
         if(!ImGui.CollapsingHeader("頁簽位置")) return;
-        ImGui.TextWrapped("Tab 5、6 與左右端帽一起移動，修改後立即生效並自動儲存。");
+        ImGui.TextWrapped("Tab 5、6、左右端帽及齒輪一起移動，修改後立即生效並自動儲存。");
         var horizontal=config.Placement.HorizontalOffset;
         var vertical=config.Placement.VerticalOffset;
         ImGui.SetNextItemWidth(180);
@@ -333,7 +333,7 @@ public sealed class Plugin : IDalamudPlugin, IAsyncDisposable
             DrawPlacementControls();
             DrawFilterEditor();
             if(ImGui.Button("回復原生第 4 頁")) Queue(()=> { Restore(); RecoverPending(); status="原生設定已還原。"; });
-            ImGui.TextWrapped("新增頁籤與左右端帽可在「頁簽位置」調整水平／垂直偏移，無須拉寬聊天框。");
+            ImGui.TextWrapped("新增頁籤右側的齒輪可開啟此設定；整組可在「頁簽位置」調整水平／垂直偏移，無須拉寬聊天框。");
         }
         ImGui.End();
     }
